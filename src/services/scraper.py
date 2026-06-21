@@ -25,12 +25,12 @@ async def extract_article_content(url: str) -> str:
          for element in soup(['script', 'style', 'nav', 'header', 'aside', 'form']): # Para esses elementos, "ignore"
             element.decompose()
 
-      article_body = soup.find('article') or soup.fine('main') or soup.find('body')
+      article_body = soup.find('article') or soup.find('main') or soup.find('body')
 
       if not article_body:
          raise HTTPException(status_code=422, detail='Could not extract readable text content from this URL.')
       text = article_body.get_text(separator=' ')
-      clean_text = ' '.join(text.spli())
+      clean_text = ' '.join(text.split())
       if len(clean_text) < 200:
          raise HTTPException(status_code=422, detail="The extracted content is too short be summarized.")
 
