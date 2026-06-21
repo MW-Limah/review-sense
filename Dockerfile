@@ -7,9 +7,9 @@ ENV UV_LINK_MODE=copy
 
 COPY pyproject.toml uv.lock ./
 
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
+RUN --mount=type=cache,id=${{cacheKey}}-uv-cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
-    
+
 FROM python:3.14-alpine
 
 WORKDIR /app
