@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.config.settings import settings
 
 app = FastAPI(
     title='Smart Content Summarizer AI',
