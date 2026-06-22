@@ -21,6 +21,8 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 COPY src/ ./src
 
+RUN mkdir -p /data
+
 EXPOSE 8000
 
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
