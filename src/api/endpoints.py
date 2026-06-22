@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database import get_db
-from src.models import SavedSummary  # Certifique-se de herdar a classe que criamos no passo anterior
+from src.models import SavedSummary
 from src.services.gemini import SummaryResponse, generate_ai_summary
 from src.services.scraper import extract_article_content
 

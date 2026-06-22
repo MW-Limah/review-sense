@@ -7,7 +7,6 @@ ENV UV_LINK_MODE=copy
 
 COPY pyproject.toml uv.lock ./
 
-# CORREÇÃO: Utilizando o ID estático fornecido pelo diagnóstico do Railway
 RUN --mount=type=cache,id=s/c588207c-64f6-4b3b-a0ac-fce2ff20e1d4-/root/.cache/uv,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
