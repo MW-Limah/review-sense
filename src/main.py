@@ -1,12 +1,29 @@
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.endpoints import router as api_router
+from src.database import Base, engine
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    os.makedirs("/data", exist_ok=True)
+
+    async with engine.begin() as conn:
+
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+
 
 app = FastAPI(
     title="Smart Content Summarizer AI",
     description="API for scraping and summarizing articles using Gemini 1.5 Flash",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 app.add_middleware(
@@ -21,6 +38,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+
 
 @app.get("/")
 async def root():
