@@ -7,8 +7,13 @@ from src.database import get_db
 from src.models import SavedSummary
 from src.services.gemini import SummaryResponse, generate_ai_summary
 from src.services.scraper import extract_article_content
+from src.services.translator import translate_text
 
 router = APIRouter(prefix="/api/v1", tags=["Summarizer"])
+
+class TranslationRequest(BaseModel):
+    url: HttpUrl
+    target_language = str
 
 class SummaryRequest(BaseModel):
     url: HttpUrl
@@ -20,16 +25,51 @@ class SummaryRequest(BaseModel):
     summary="Scrape and summarize a web article",
     description="Takes a URL, extracts core content, checks SQLite cache, and uses Gemini if not cached."
 )
+
+@router.post("/translate", status_code=status.HTTP_200_OK)
+async def translate_cached_summary(payload: TranslationRequest, db: AsyncSession = Depends(get_db)):
+    url_str = str(payload.url)
+
+    result = await db.execute(select(SavedSummary).where(SavedSummary.url == url_str))
+    cached = result.scalar_one_or_none()
+
+    if not cached:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Este link ainda não foi sumarizado. Processe o link primeiro na rota principal."
+        )
+
+    try:
+        translated_title = await translate_text(cached.title, payload.target_language)
+        translated_summary = await translate_text(cached.summary, payload.target_language)
+
+        translated_takeaways = []
+        for item in cached.key_takeaways:
+            translated_item = await translate_text(item, payload.target_language)
+            translated_takeaways.append(translated_item)
+
+        return {
+            "title": translated_title,
+            "summary": translated_summary,
+            "key_takeaways": translated_takeaways,
+            "estimated_reading_time": cached.estimated_reading_time
+        }
+
+    except Exception as err:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao traduzir o conteúdo: {str(err)}"
+        )
+
+
 async def summarize_url(payload: SummaryRequest, db: AsyncSession = Depends(get_db)):
     url_str = str(payload.url)
 
     try:
-        # 1. Busca na "Memória" do banco de dados (SQLite)
         result = await db.execute(select(SavedSummary).where(SavedSummary.url == url_str))
         cached_summary = result.scalar_one_or_none()
 
         if cached_summary:
-            # Se já foi sumarizado antes, retorna o histórico imediatamente
             return {
                 "title": cached_summary.title,
                 "summary": cached_summary.summary,
@@ -37,16 +77,13 @@ async def summarize_url(payload: SummaryRequest, db: AsyncSession = Depends(get_
                 "estimated_reading_time": cached_summary.estimated_reading_time
             }
 
-        # 2. Se for um link novo, faz o fluxo tradicional de raspagem
         clean_text = await extract_article_content(url_str)
 
-        # 3. Executa a inteligência artificial do Gemini
         ai_analysis = await generate_ai_summary(clean_text)
 
-        # 4. Salva o resultado no banco para futuras requisições do mesmo link
         new_cache = SavedSummary(
             url=url_str,
-            title=ai_analysis.title,          # Acessa os atributos baseados na sua classe SummaryResponse
+            title=ai_analysis.title,
             summary=ai_analysis.summary,
             key_takeaways=ai_analysis.key_takeaways,
             estimated_reading_time=ai_analysis.estimated_reading_time
