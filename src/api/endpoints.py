@@ -1,3 +1,7 @@
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+from deep_translator import GoogleTranslator as GT
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy import select
@@ -7,16 +11,27 @@ from src.database import get_db
 from src.models import SavedSummary
 from src.services.gemini import SummaryResponse, generate_ai_summary
 from src.services.scraper import extract_article_content
-from src.services.translator import translate_text
 
 router = APIRouter(prefix="/api/v1", tags=["Summarizer"])
 
+
 class TranslationRequest(BaseModel):
     url: HttpUrl
-    target_language = str
+    target_language: str
 
 class SummaryRequest(BaseModel):
     url: HttpUrl
+
+
+
+executor = ThreadPoolExecutor(max_workers=3)
+
+def _execute_translation(text: str, target_lang: str) -> str:
+    return GT(source="auto", target=target_lang).translate(text)
+
+async def translate_text(text: str, target_lang: str) -> str:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(executor, _execute_translation, text, target_lang)
 
 @router.post(
     "/summarize",
@@ -25,6 +40,42 @@ class SummaryRequest(BaseModel):
     summary="Scrape and summarize a web article",
     description="Takes a URL, extracts core content, checks SQLite cache, and uses Gemini if not cached."
 )
+async def summarize_url(payload: SummaryRequest, db: AsyncSession = Depends(get_db)):
+    url_str = str(payload.url)
+
+    try:
+        result = await db.execute(select(SavedSummary).where(SavedSummary.url == url_str))
+        cached_summary = result.scalar_one_or_none()
+
+        if cached_summary:
+            return {
+                "title": cached_summary.title,
+                "summary": cached_summary.summary,
+                "key_takeaways": cached_summary.key_takeaways,
+                "estimated_reading_time": cached_summary.estimated_reading_time
+            }
+
+        clean_text = await extract_article_content(url_str)
+        ai_analysis = await generate_ai_summary(clean_text)
+
+        new_cache = SavedSummary(
+            url=url_str,
+            title=ai_analysis.title,
+            summary=ai_analysis.summary,
+            key_takeaways=ai_analysis.key_takeaways,
+            estimated_reading_time=ai_analysis.estimated_reading_time
+        )
+        db.add(new_cache)
+        await db.commit()
+
+        return ai_analysis
+
+    except ValueError as val_err:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(val_err)
+        )
+
 
 @router.post("/translate", status_code=status.HTTP_200_OK)
 async def translate_cached_summary(payload: TranslationRequest, db: AsyncSession = Depends(get_db)):
@@ -59,42 +110,4 @@ async def translate_cached_summary(payload: TranslationRequest, db: AsyncSession
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao traduzir o conteúdo: {str(err)}"
-        )
-
-
-async def summarize_url(payload: SummaryRequest, db: AsyncSession = Depends(get_db)):
-    url_str = str(payload.url)
-
-    try:
-        result = await db.execute(select(SavedSummary).where(SavedSummary.url == url_str))
-        cached_summary = result.scalar_one_or_none()
-
-        if cached_summary:
-            return {
-                "title": cached_summary.title,
-                "summary": cached_summary.summary,
-                "key_takeaways": cached_summary.key_takeaways,
-                "estimated_reading_time": cached_summary.estimated_reading_time
-            }
-
-        clean_text = await extract_article_content(url_str)
-
-        ai_analysis = await generate_ai_summary(clean_text)
-
-        new_cache = SavedSummary(
-            url=url_str,
-            title=ai_analysis.title,
-            summary=ai_analysis.summary,
-            key_takeaways=ai_analysis.key_takeaways,
-            estimated_reading_time=ai_analysis.estimated_reading_time
-        )
-        db.add(new_cache)
-        await db.commit()
-
-        return ai_analysis
-
-    except ValueError as val_err:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(val_err)
         )
